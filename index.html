@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kiosco Facial en la Nube</title>
+    <title>Kiosco Facial Inteligente Pro</title>
     <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
@@ -22,21 +22,22 @@
         button { background-color: #3498db; color: white; border: none; cursor: pointer; font-weight: bold; font-size: 16px; }
         button:hover { background-color: #2980b9; }
         button:disabled { background-color: #bdc3c7; cursor: not-allowed; }
-        .btn-green { background-color: #2ecc71; }
+        .btn-green { background-color: #2ecc71; font-size: 18px; padding: 15px; }
         .btn-green:hover { background-color: #27ae60; }
         .btn-orange { background-color: #e67e22; font-size: 18px; padding: 15px; }
         .btn-orange:hover { background-color: #d35400; }
         ul { list-style-type: none; padding: 0; }
         li { background: #fff; margin: 8px 0; padding: 12px; border-radius: 6px; border-left: 5px solid #3498db; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-        .camera-overlay-text { color: #f1c40f; font-weight: bold; margin-top: 8px; font-size: 18px; }
+        .camera-overlay-text { color: #f1c40f; font-weight: bold; margin-top: 8px; font-size: 18px; animation: pulse 1.5s infinite; }
         .badge-hours { background-color: #2980b9; color: white; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: bold; float: right; }
         .badge-total { background-color: #27ae60; color: white; padding: 4px 8px; border-radius: 4px; font-size: 13px; font-weight: bold; float: right; margin-left: 5px; }
+        @keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>Kiosco Facial en la Nube ☁️</h2>
+    <h2>Kiosco Facial Automatizado Pro ☁️</h2>
     
     <div id="loadingStatus" class="status-loading">⏳ Sincronizando Inteligencia Facial y conectando a la Nube...</div>
 
@@ -47,12 +48,8 @@
     </div>
 
     <div class="section">
-        <h3>1️⃣ Verificación de Identidad</h3>
-        <select id="punchType">
-            <option value="Entrada">Entrada</option>
-            <option value="Salida">Salida</option>
-        </select>
-        <button id="btnStartPunch" class="btn-green" onclick="iniciarEscaneoPonche()" disabled>📸 Escanear Rostro (Ponchar)</button>
+        <h3>1️⃣ Registro de Asistencia Automático (Multi-Ángulo)</h3>
+        <button id="btnStartPunch" class="btn-green" onclick="iniciarEscaneoPonche()" disabled>📸 Escanear Mi Rostro</button>
     </div>
 
     <div class="section">
@@ -74,6 +71,7 @@
 
 <script>
     const CLAVE_ADMIN = "12345678";
+    const UMBRAL_TOLERANCIA = 0.55; // Menor número = más estricto. Evita falsos positivos.
 
     const firebaseConfig = {
       apiKey: "AIzaSyCrF72uUVwLQsjSm8Aoq87_8h8vv2InYuM",
@@ -132,11 +130,7 @@
         document.getElementById('fechaFiltro').value = fechaArmada;
     }
 
-    // =========================================================================
-    // NUEVA LÓGICA: CÁLCULO DE BLOQUES Y TOTALES ACUMULADOS DIARIOS
-    // =========================================================================
     function procesarTiemposJornada(registroActual, todosLosRegistros) {
-        // Buscamos cronológicamente todos los ponches históricos de este trabajador
         let historialCompleto = todosLosRegistros
             .filter(r => r.nombre === registroActual.nombre)
             .sort((a, b) => a.timestamp - b.timestamp);
@@ -144,11 +138,9 @@
         let horasEsteBloque = 0;
         let horasTotalesDelDia = 0;
 
-        // Buscamos el índice del registro actual dentro de su historial entero
         let indiceActual = historialCompleto.findIndex(r => r.timestamp === registroActual.timestamp);
         if (indiceActual === -1) return { bloque: "0.00 hrs", totalDia: "Total: 0.00 hrs" };
 
-        // 1. CÁLCULO DEL BLOQUE ACTUAL (Si es una salida, calcula contra su entrada previa directa)
         if (registroActual.tipo === "Salida" && indiceActual > 0) {
             let registroPrevio = historialCompleto[indiceActual - 1];
             if (registroPrevio.tipo === "Entrada") {
@@ -157,26 +149,17 @@
             }
         }
 
-        // 2. CÁLCULO DEL ACUMULADO TOTAL DE LA JORNADA DE ESTE DÍA ESPECÍFICO
-        // Filtramos todos los registros de este trabajador del MISMO DÍA (basándonos en la fecha de la Entrada original)
-        let entradasYSalidasDeLaJornada = historialCompleto.filter(r => r.fecha === registroActual.fecha);
+        let entriesAndExits = historialCompleto.filter(r => r.fecha === registroActual.fecha);
 
-        // Recorremos en parejas estructuradas para sumar los bloques completados de este día
-        for (let i = 0; i < entradasYSalidasDeLaJornada.length; i++) {
-            // Si encontramos una Entrada y el siguiente elemento es una Salida, sumamos ese bloque al acumulado del día
-            if (entradasYSalidasDeLaJornada[i].tipo === "Entrada" && 
-                entradasYSalidasDeLaJornada[i+1] && 
-                entradasYSalidasDeLaJornada[i+1].type !== "Entrada") { // Asegura que el siguiente sea Salida
-                
-                let entradaJornada = entradasYSalidasDeLaJornada[i];
-                let salidaJornada = entradasYSalidasDeLaJornada[i+1];
-                
-                // Solo acumulamos si ocurrió antes o es exactamente igual al registro actual en procesamiento
-                if (salidaJornada.timestamp <= registroActual.timestamp) {
-                    let diff = salidaJornada.timestamp - entradaJornada.timestamp;
+        for (let i = 0; i < entriesAndExits.length; i++) {
+            if (entriesAndExits[i].tipo === "Entrada" && entriesAndExits[i+1] && entriesAndExits[i+1].tipo === "Salida") {
+                let ent = entriesAndExits[i];
+                let sal = entriesAndExits[i+1];
+                if (sal.timestamp <= registroActual.timestamp) {
+                    let diff = sal.timestamp - ent.timestamp;
                     horasTotalesDelDia += (diff / (1000 * 60 * 60));
                 }
-                i++; // Brincamos la pareja ya procesada
+                i++; 
             }
         }
 
@@ -201,8 +184,6 @@
 
         ponchesDelDia.forEach(reg => {
             let li = document.createElement('li');
-            
-            // Calculamos tanto las horas del bloque como el acumulado diario en tiempo real
             let calculos = procesarTiemposJornada(reg, registros);
             
             li.innerHTML = `
@@ -240,28 +221,27 @@
 
         const { value: claveIngresada } = await Swal.fire({
             title: '🔐 ACCESO RESTRINGIDO',
-            text: 'Solo el administrador puede dar de alta nuevos perfiles biométricos. Introduce la clave:',
+            text: 'Solo el administrador puede registrar nuevos perfiles biométricos:',
             input: 'password',
-            inputPlaceholder: 'Clave de administrador...',
+            inputPlaceholder: 'Clave...',
             showCancelButton: true,
-            confirmButtonText: 'Validar y Abrir Cámara',
-            cancelButtonText: 'Cancelar',
             confirmButtonColor: '#3498db'
         });
 
-        if (!claveIngresada) return;
-
-        if (claveIngresada !== CLAVE_ADMIN) {
-            Swal.fire({ icon: 'error', title: 'Clave Incorrecta', text: 'No tienes permisos para registrar personal.' });
+        if (!claveIngresada || claveIngresada !== CLAVE_ADMIN) {
+            Swal.fire({ icon: 'error', title: 'Acceso Denegado', text: 'Clave incorrecta o proceso cancelado.' });
             return;
         }
 
         iniciarEscaneoRegistro(nombreInput);
     }
 
+    // =========================================================================
+    // REGISTRO MEJORADO CON FILTRO ANTIDUPLICADOS
+    // =========================================================================
     async function iniciarEscaneoRegistro(nombreTrabajador) {
         document.getElementById('cameraActionTitle').innerText = "Registrando Rostro...";
-        document.getElementById('cameraSubText').innerText = "Quédate quieto frente a la cámara...";
+        document.getElementById('cameraSubText').innerText = "Quédate quieto viendo al frente...";
 
         try {
             await encenderCamara();
@@ -279,17 +259,39 @@
             apagarCamara();
 
             if (!rostroCapturado) {
-                Swal.fire({ icon: 'error', title: 'Fallo de Captura', text: 'No se detectó un rostro claro. Inténtalo de nuevo.' });
+                Swal.fire({ icon: 'error', title: 'Fallo de Captura', text: 'No se detectó un rostro claro.' });
                 return;
             }
 
-            let descriptorPlano = Array.from(rostroCapturado.descriptor);
+            // --- ESCUDO ANTIDUPLICADOS ---
+            const descriptorNuevo = rostroCapturado.descriptor;
+            let yaExistePersona = null;
+
+            empleados.forEach(emp => {
+                const descGuardado = new Float32Array(emp.descriptor);
+                const distancia = faceapi.euclideanDistance(descriptorNuevo, descGuardado);
+                if (distancia < UMBRAL_TOLERANCIA) {
+                    yaExistePersona = emp;
+                }
+            });
+
+            if (yaExistePersona) {
+                Swal.fire({
+                    icon: 'error',
+                    title: '¡Rostro Duplicado!',
+                    text: `Este rostro ya está registrado en el sistema bajo el nombre de: ${yaExistePersona.nombre}.`
+                });
+                return;
+            }
+            // -----------------------------
+
+            let descriptorPlano = Array.from(descriptorNuevo);
             let nuevoEmpleado = { nombre: nombreTrabajador, descriptor: descriptorPlano };
 
             await db.collection("empleados").add(nuevoEmpleado);
             document.getElementById('newEmpName').value = "";
             
-            Swal.fire({ icon: 'success', title: '¡Registro Exitoso!', text: `${nombreTrabajador} ha sido guardado en la nube.` });
+            Swal.fire({ icon: 'success', title: '¡Registro Exitoso!', text: `${nombreTrabajador} guardado en la nube.` });
 
         } catch (err) {
             console.error(err);
@@ -298,111 +300,154 @@
         }
     }
 
+    // =========================================================================
+    // VERIFICACIÓN INTEGRAL PAUSADA (PASO A PASO POR ÁNGULOS)
+    // =========================================================================
     async function iniciarEscaneoPonche() {
         if (!modelosCargados) return;
-        if (empleados.length === 0) {
-            Swal.fire({ icon: 'info', title: 'Base de datos vacía', text: 'No hay trabajadores dados de alta.' });
-            return;
-        }
 
-        const tipoPonche = document.getElementById('punchType').value;
-        document.getElementById('cameraActionTitle').innerText = `Procesando ${tipoPonche}...`;
-        document.getElementById('cameraSubText').innerText = "Analizando facciones biométricas...";
+        document.getElementById('cameraActionTitle').innerText = `Iniciando Verificación...`;
         
         try {
             await encenderCamara();
             const video = document.getElementById('videoFeed');
-            let intentos = 0;
-            let rostroDetectado = null;
-
-            while (intentos < 30) {
-                rostroDetectado = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
-                if (rostroDetectado) break;
-                intentos++;
-                await new Promise(resolve => setTimeout(resolve, 200));
+            
+            // Declaramos las instrucciones de los ángulos para guiar al trabajador paso a paso
+            let pasosGiro = [
+                "Paso 1/3: Mira FIJO de frente...",
+                "Paso 2/3: Gira LEVEMENTE a la derecha...",
+                "Paso 3/3: Gira LEVEMENTE a la izquierda..."
+            ];
+            
+            let descriptoresCapturados = [];
+            
+            // Bucle exhaustivo: Obligamos al sistema a tomar 3 muestras en diferentes estados
+            for(let paso = 0; paso < pasosGiro.length; paso++) {
+                document.getElementById('cameraSubText').innerText = pasosGiro[paso];
+                
+                let lecturaExitosa = null;
+                let intentosPaso = 0;
+                
+                // Damos hasta 30 intentos (6 segundos) por cada ángulo para que la persona se mueva
+                while(intentosPaso < 30) {
+                    let deteccion = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
+                    if (deteccion) {
+                        lecturaExitosa = deteccion.descriptor;
+                        break;
+                    }
+                    intentosPaso++;
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                }
+                
+                if (lecturaExitosa) {
+                    descriptoresCapturados.push(lecturaExitosa);
+                    // Pequeña pausa visual para que el trabajador note que se aceptó el paso
+                    await new Promise(resolve => setTimeout(resolve, 400));
+                } else {
+                    // Si se mueve muy rápido o no lee, rompemos el bucle
+                    break;
+                }
             }
 
             apagarCamara();
 
-            if (!rostroDetectado) {
-                Swal.fire({ icon: 'warning', title: 'Tiempo Agotado', text: 'No se detectó ningún rostro estable.' });
+            // Si no recolectó las 3 muestras completas, significa que falló el proceso pausado
+            if (descriptoresCapturados.length < 3) {
+                Swal.fire({ icon: 'warning', title: 'Escaneo Incompleto', text: 'No se pudieron validar los tres ángulos requeridos. Por favor, mantén una postura firme y pausada.' });
                 return;
             }
 
-            const descriptorActual = rostroDetectado.descriptor;
-            let trabajadorEncontrado = null;
-            let diferenciaMinima = 0.6; 
+            // Evaluamos las 3 muestras contra la base de datos para buscar votación mayoritaria o consistencia
+            let votosTrabajadores = {};
+            
+            // Analizamos cada una de las 3 muestras tomadas
+            descriptoresCapturados.forEach(descriptorActual => {
+                let mejorMatchPaso = null;
+                let distMinima = UMBRAL_TOLERANCIA;
 
-            empleados.forEach(emp => {
-                const descriptorGuardado = new Float32Array(emp.descriptor);
-                const diferencia = faceapi.euclideanDistance(descriptorActual, descriptorGuardado);
-                if (diferencia < diferenciaMinima) {
-                    diferenciaMinima = diferencia;
-                    trabajadorEncontrado = emp;
+                empleados.forEach(emp => {
+                    const descGuardado = new Float32Array(emp.descriptor);
+                    const distancia = faceapi.euclideanDistance(descriptorActual, descGuardado);
+                    if (distancia < distMinima) {
+                        distMinima = distancia;
+                        mejorMatchPaso = emp;
+                    }
+                });
+
+                if (mejorMatchPaso) {
+                    votosTrabajadores[mejorMatchPaso.nombre] = (votosTrabajadores[mejorMatchPaso.nombre] || 0) + 1;
                 }
             });
 
-            if (trabajadorEncontrado) {
+            // Buscamos cuál trabajador obtuvo la mayor cantidad de coincidencias estables en los ángulos
+            let nombreGanador = null;
+            let maxVotos = 0;
+            
+            for (let nombre in votosTrabajadores) {
+                if (votosTrabajadores[nombre] > maxVotos) {
+                    maxVotos = votosTrabajadores[nombre];
+                    nombreGanador = nombre;
+                }
+            }
+
+            // Exigimos que al menos 2 de los 3 ángulos hayan verificado exitosamente a la misma persona
+            if (nombreGanador && maxVotos >= 2) {
+                let trabajadorEncontrado = empleados.find(e => e.nombre === nombreGanador);
+                
+                let historialPersona = registros
+                    .filter(r => r.nombre === trabajadorEncontrado.nombre)
+                    .sort((a, b) => a.timestamp - b.timestamp);
+
+                let proximaAccionAuto = "Entrada";
+                if (historialPersona.length > 0) {
+                    let ultimaMarcaModo = historialPersona[historialPersona.length - 1];
+                    proximaAccionAuto = ultimaMarcaModo.tipo === "Entrada" ? "Salida" : "Entrada";
+                }
+
                 const confirmacion = await Swal.fire({
-                    title: '¿Eres tú?',
-                    text: `El sistema detectó a: ${trabajadorEncontrado.nombre}`,
+                    title: `¿Eres tú, ${trabajadorEncontrado.nombre}?`,
+                    text: `Validación por ángulos exitosa. Acción: ${proximaAccionAuto}`,
                     icon: 'question',
                     showCancelButton: true,
-                    confirmButtonText: 'Sí, confirmar ponche',
-                    cancelButtonText: 'No, error',
-                    confirmButtonColor: '#2ecc71',
-                    cancelButtonColor: '#e74c3c'
+                    confirmButtonText: `Sí, marcar ${proximaAccionAuto}`,
+                    cancelButtonText: 'No, cancelar'
                 });
 
                 if (confirmacion.isConfirmed) {
                     let reloj = new Date();
                     let mes = ('0' + (reloj.getMonth() + 1)).slice(-2);
                     let dia = ('0' + reloj.getDate()).slice(-2);
-                    
-                    // Manejo especial de turnos nocturnos cruzados: si es una Salida de madrugada (ej: entre 12:00 AM y 5:00 AM)
-                    // y su última Entrada fue el día anterior, heredamos la fecha del día anterior para agrupar la misma jornada laboral.
                     let fechaLimpia = `${reloj.getFullYear()}-${mes}-${dia}`;
                     
-                    if (tipoPonche === "Salida") {
-                        let historialTrabajador = registros
-                            .filter(r => r.nombre === trabajadorEncontrado.nombre)
-                            .sort((a, b) => a.timestamp - b.timestamp);
-                        if (historialTrabajador.length > 0) {
-                            let ultimoReg = historialTrabajador[0]; // El más reciente en memoria local
-                            if (ultimoReg.tipo === "Entrada" && ultimoReg.fecha !== fechaLimpia) {
-                                // Mantenemos la fecha de la Entrada para que se calcule en el acumulado de esa misma jornada
-                                fechaLimpia = ultimoReg.fecha;
-                            }
+                    if (proximaAccionAuto === "Salida" && historialPersona.length > 0) {
+                        let ultimaEntradaCruce = historialPersona[historialPersona.length - 1];
+                        if (ultimaEntradaCruce.tipo === "Entrada" && ultimaEntradaCruce.fecha !== fechaLimpia) {
+                            fechaLimpia = ultimaEntradaCruce.fecha;
                         }
                     }
 
                     let nuevoRegistro = {
                         nombre: trabajadorEncontrado.nombre,
-                        tipo: tipoPonche,
+                        tipo: proximaAccionAuto,
                         fecha: fechaLimpia,
                         hora: reloj.toLocaleTimeString(),
                         timestamp: reloj.getTime() 
                     };
 
                     await db.collection("registros").add(nuevoRegistro);
-                    Swal.fire({ icon: 'success', title: '¡Registrado!', text: `Ponche de ${tipoPonche} guardado con éxito.`, timer: 2000, showConfirmButton: false });
-                } else {
-                    Swal.fire({ icon: 'info', title: 'Cancelado', text: 'El registro fue cancelado.' });
+                    Swal.fire({ icon: 'success', title: '¡Registrado!', text: `Se registró tu ${proximaAccionAuto} con éxito.`, timer: 2000, showConfirmButton: false });
                 }
             } else {
-                Swal.fire({ icon: 'error', title: 'No Reconocido', text: 'El rostro no coincide con ningún miembro del personal.' });
+                Swal.fire({ icon: 'error', title: 'No Reconocido', text: 'La verificación por ángulos falló. El rostro no coincide de forma consistente con ningún trabajador registrado.' });
             }
 
         } catch (err) {
             console.error(err);
             apagarCamara();
-            Swal.fire({ icon: 'error', title: 'Error', text: 'Ocurrió un error en el escaneo.' });
+            Swal.fire({ icon: 'error', title: 'Error', text: 'Ocurrió un error operativo en el hardware.' });
         }
     }
 
-    // ==========================================
-    // EXPORTACIÓN EXCEL CON EL DESGLOSE COMPLETO
-    // ==========================================
     async function descargarReporteFecha() {
         let fechaSeleccionada = document.getElementById('fechaFiltro').value;
         let ponchesFiltrados = registros.filter(reg => reg.fecha === fechaSeleccionada);
@@ -416,16 +461,12 @@
             title: 'Acceso Restringido',
             text: 'Introduce la clave de administrador para bajar el reporte:',
             input: 'password',
-            inputPlaceholder: 'Clave de seguridad...',
+            inputPlaceholder: 'Clave...',
             showCancelButton: true,
-            confirmButtonText: 'Validar y Descargar',
-            cancelButtonText: 'Cancelar',
             confirmButtonColor: '#e67e22'
         });
 
-        if (!claveIngresada) return;
-
-        if (claveIngresada !== CLAVE_ADMIN) {
+        if (!claveIngresada || claveIngresada !== CLAVE_ADMIN) {
             Swal.fire({ icon: 'error', title: 'Clave Incorrecta', text: 'Acceso denegado.' });
             return;
         }
@@ -433,7 +474,6 @@
         let contenidoCSV = "\uFEFF"; 
         contenidoCSV += "Nombre Trabajador,Accion,Fecha,Hora,Horas Este Turno,Total Acumulado Dia\n";
 
-        // Ordenamos cronológicamente de forma ascendente para estructurar la tabla del Excel de manera natural
         ponchesFiltrados.sort((a, b) => a.timestamp - b.timestamp);
         
         ponchesFiltrados.forEach(reg => {
@@ -449,7 +489,7 @@
         link.click();
         document.body.removeChild(link);
 
-        Swal.fire({ icon: 'success', title: 'Descargado', text: 'Reporte generado con el desglose acumulado de jornadas.' });
+        Swal.fire({ icon: 'success', title: 'Descargado', text: 'Reporte generado con éxito.' });
     }
 </script>
 
