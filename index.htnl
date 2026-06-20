@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kiosco de Asistencia Facial</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        h2, h3 { text-align: center; color: #2c3e50; margin-top: 5px; }
+        .section {
+            margin-bottom: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #fafafa;
+        }
+        .camera-container {
+            display: none;
+            text-align: center;
+            margin: 15px 0;
+            background: #000;
+            padding: 10px;
+            border-radius: 8px;
+            position: relative;
+        }
+        video {
+            width: 100%;
+            max-width: 400px;
+            height: auto;
+            border-radius: 6px;
+            transform: scaleX(-1); /* Efecto espejo para comodidad del usuario */
+        }
+        .status-loading {
+            background-color: #f39c12;
+            color: white;
+            text-align: center;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            font-weight: bold;
+        }
+        input, select, button {
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover { background-color: #2980b9; }
+        button:disabled { background-color: #bdc3c7; cursor: not-allowed; }
+        .btn-green { background-color: #2ecc71; }
+        .btn-green:hover { background-color: #27ae60; }
+        .btn-red { background-color: #e74c3c; }
+        .btn-red:hover { background-color: #c0392b; }
+        .btn-orange { background-color: #e67e22; font-size: 18px; padding: 15px; }
+        .btn-orange:hover { background-color: #d35400; }
+        .btn-dark { background-color: #34495e; margin-top: 15px;}
+        ul { list-style-type: none; padding: 0; }
+        li {
+            background: #eee;
+            margin: 5px 0;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .camera-overlay-text {
+            color: #2ecc71;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Kiosco de Asistencia Facial</h2>
+    
+    <div id="loadingStatus" class="status-loading">Cargando Inteligencia Facial, por favor espera...</div>
+
+    <div id="cameraArea" class="camera-container">
+        <h3 style="color: white; margin: 0 0 10px 0;" id="cameraActionTitle">Escaneando...</h3>
+        <video id="videoFeed" autoplay muted playsinline></video>
+        <div id="cameraSubText" class="camera-overlay-text">Por favor, mire fijamente a la cámara</div>
+    </div>
+
+    <div class="section">
+        <h3>Verificar Identidad (Ponche)</h3>
+        <select id="punchType">
+            <option value="Entrada">Entrada</option>
+            <option value="Salida">Salida</option>
+        </select>
+        <button id="btnStartPunch" class="btn-green" onclick="iniciarEscaneoPonche()" disabled>📸 Iniciar Reconocimiento Facial</button>
+    </div>
+
+    <div class="section" style="background-color: #fff9f1; border: 1px solid #f39c12;">
+        <h3>Operación de Turno</h3>
+        <button class="btn-orange" onclick="cerrarTurno()">🔒 Cerrar Turno y Enviar Reporte</button>
+    </div>
+
+    <div class="section">
+        <h3>Dar de Alta Trabajador</h3>
+        <input type="text" id="newEmpName" placeholder="Nombre completo del trabajador">
+        <button id="btnRegisterFace" onclick="iniciarEscaneoRegistro()" disabled>📸 Escanear Rostro y Registrar</button>
+    </div>
+
+    <div class="section">
+        <h3>Últimos 10 Registros del Turno</h3>
+        <ul id="logList"></ul>
+        <button class="btn-dark" onclick="descargarJSON()">Descargar Base de Datos Completa (JSON)</button>
+        <button class="btn-red" onclick="limpiarRegistros()" style="background-color: #95a5a6; margin-top: 5px;">Limpiar Historial Manualmente</button>
+    </div>
+</div>
+
+<script>
+    // URL pública para cargar los archivos de entrenamiento de Face-API
+    const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models/';
+    
+    let empleados = JSON.parse(localStorage.getItem('empleados_facial')) || [];
+    let registros = JSON.parse(localStorage.getItem('registros_facial')) || [];
+    let streamLocal = null;
+    let modelosCargados = false;
+
+    // Inicializar la aplicación al cargar la ventana
+    window.onload = async () => {
+        try {
+            // Cargamos los tres modelos críticos: Detector base, Marcadores (puntos de facciones) y Reconocimiento (conversión a vector numérico)
+            await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+            await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+            await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+            
+            modelosCargados = true;
+            document.getElementById('loadingStatus').style.display = 'none';
+            document.getElementById('btnStartPunch').disabled = false;
+            document.getElementById('btnRegisterFace').disabled = false;
+            actualizarListaRegistros();
+        } catch (error) {
+            console.error(error);
+            document.getElementById('loadingStatus').innerText = "Error cargando los modelos de IA. Verifica tu conexión a internet.";
+            document.getElementById('loadingStatus').style.backgroundColor = "#e74c3c";
+        }
+    };
+
+    // Control del flujo de hardware de la cámara
+    async function encenderCamara() {
+        document.getElementById('cameraArea').style.display = 'block';
+        streamLocal = await navigator.mediaDevices.getUserMedia({ 
+            video: { width: 640, height: 480, facingMode: "user" } 
+        });
+        document.getElementById('videoFeed').srcObject = streamLocal;
+        // Esperar un momento a que el video procese el stream
+        await new Promise(resolve => document.getElementById('videoFeed').onloadedmetadata = resolve);
+    }
+
+    function apagarCamara() {
+        if (streamLocal) {
+            streamLocal.getTracks().forEach(track => track.stop());
+        }
+        document.getElementById('videoFeed').srcObject = null;
+        document.getElementById('cameraArea').style.display = 'none';
+    }
+
+    // FLUJO: ESCANEO Y PONCHE
+    async function iniciarEscaneoPonche() {
+        if (!modelosCargados) return;
+        if (empleados.length === 0) {
+            alert("No hay ningún trabajador registrado en el sistema todavía.");
+            return;
+        }
+
+        const tipoPonche = document.getElementById('punchType').value;
+        document.getElementById('cameraActionTitle').innerText = `Procesando ${tipoPonche}...`;
+        document.getElementById('cameraSubText').innerText = "Buscando rostro...";
+        
+        try {
+            await encenderCamara();
+            const video = document.getElementById('videoFeed');
+            
+            let intentos = 0;
+            let rostroDetectado = null;
+
+            // Bucle de lectura activa (máximo 30 intentos para no dejar la cámara encendida indefinidamente)
+            while (intentos < 30) {
+                rostroDetectado = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+                                             .withFaceLandmarks()
+                                             .withFaceDescriptor();
+                
+                if (rostroDetectado) {
+                    document.getElementById('cameraSubText').innerText = "Anclando facciones biométricas...";
+                    break; 
+                }
+                intentos++;
+                await new Promise(resolve => setTimeout(resolve, 200)); // Espera 200ms entre escaneos
+            }
+
+            apagarCamara();
+
+            if (!rostroDetectado) {
+                alert("Error: Tiempo de espera agotado. No se detectó ningún rostro estable frente a la cámara.");
+                return;
+            }
+
+            // Comparar el rostro obtenido contra toda la base de datos local
+            const descriptorActual = rostroDetectado.descriptor;
+            let mejorCoincidencia = null;
+            let distanciaMinima = 0.6; // Umbral de tolerancia estricto (menor distancia = mayor parecido)
+
+            empleados.forEach(emp => {
+                // Reconstruimos el formato original del descriptor guardado (Array a Float32Array)
+                const descriptorGuardado = new Float32Array(emp.descriptor);
+                const distancia = faceapi.euclideanDistance(descriptorActual, descriptorGuardado);
+                
+                if (distancia < distanciaMinima) {
+                    distanciaMinima = distancia;
+                    mejorCoincidencia = emp;
+                }
+            });
+
+            if (mejorCoincidencia) {
+                // Registro exitoso del Ponche
+                let fechaHora = new Date();
+                let nuevoRegistro = {
+                    idTrabajador: mejorCoincidencia.id,
+                    nombre: mejorCoincidencia.nombre,
+                    tipo: tipoPonche,
+                    fecha: fechaHora.toLocaleDateString(),
+                    hora: fechaHora.toLocaleTimeString()
+                };
+
+                registros.unshift(nuevoRegistro);
+                guardarDatos();
+                actualizarListaRegistros();
+                alert(`¡Ponche de ${tipoPonche} EXITOSO!\n\nTrabajador: ${mejorCoincidencia.nombre}\nPrecisión de coincidencia: ${((1 - distanciaMinima) * 100).toFixed(1)}%`);
+            } else {
+                alert("Error de Verificación:\nEl rostro escaneado no coincide con ningún trabajador registrado en este dispositivo.");
+            }
+
+        } catch (err) {
+            console.error(err);
+            apagarCamara();
+            alert("Sucedió un error accediendo al hardware de la cámara corporativa.");
+        }
+    }
+
+    // FLUJO: ENROLAMIENTO (REGISTRAR TRABAJADOR NUEVO)
+    async function iniciarEscaneoRegistro() {
+        if (!modelosCargados) return;
+        const nombreInput = document.getElementById('newEmpName').value.trim();
+        
+        if (nombreInput === "") {
+            alert("Por favor, introduce el nombre completo del trabajador antes de encender la cámara.");
+            return;
+        }
+
+        document.getElementById('cameraActionTitle').innerText = "Registrando Rostro Nuevo";
+        document.getElementById('cameraSubText').innerText = "Posiciónate frente a la cámara...";
+
+        try {
+            await encenderCamara();
+            const video = document.getElementById('videoFeed');
+            
+            let intentos = 0;
+            let rostroCapturado = null;
+
+            while (intentos < 40) {
+                rostroCapturado = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+                                              .withFaceLandmarks()
+                                              .withFaceDescriptor();
+                if (rostroCapturado) break;
+                intentos++;
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+
+            apagarCamara();
+
+            if (!rostroCapturado) {
+                alert("No se pudo capturar un mapa biométrico claro. Intenta en un espacio con mejor iluminación.");
+                return;
+            }
+
+            // Crear identificador estructurado único
+            let nuevoId = empleados.length > 0 ? empleados[empleados.length - 1].id + 1 : 1;
+            
+            // Importante: Convertimos el Float32Array de Face-API a un Array estándar compatible con JSON
+            let descriptorPlano = Array.from(rostroCapturado.descriptor);
+
+            empleados.push({
+                id: nuevoId,
+                nombre: nombreInput,
+                descriptor: descriptorPlano
+            });
+
+            guardarDatos();
+            document.getElementById('newEmpName').value = "";
+            alert(`Registro Exitoso:\n${nombreInput} ha sido dado de alta biométricamente en el sistema.`);
+
+        } catch (err) {
+            console.error(err);
+            apagarCamara();
+            alert("Error durante la inicialización de captura de datos.");
+        }
+    }
+
+    // FLUJO: CIERRE DE TURNO Y EXPORTACIÓN A EXCEL (CSV) + CORREO
+    function cerrarTurno() {
+        if (registros.length === 0) {
+            alert("No se registran ponches en el turno activo.");
+            return;
+        }
+
+        let correoDestino = prompt("Introduce la dirección de correo corporativa para enviar el archivo de cierre:");
+        if (correoDestino === null) return; 
+        if (correoDestino.trim() === "") {
+            alert("Debes escribir una dirección válida de correo electrónico.");
+            return;
+        }
+
+        let fechaHoy = new Date().toLocaleDateString();
+        
+        // Formato Estructurado para el cuerpo de texto del email
+        let resumenTexto = `REPORTE CONSOLIDADO DE ASISTENCIA - CIERRE DE TURNO (${fechaHoy})\n`;
+        resumenTexto += `Fecha de extracción: ${new Date().toLocaleString()}\n`;
+        resumenTexto += `==================================================\n\n`;
+        resumenTexto += `Empleado | Registro | Fecha | Hora\n`;
+        resumenTexto += `--------------------------------------------------\n`;
+
+        // Formato de Datos separado por comas (CSV) compatible con Microsoft Excel
+        let contenidoCSV = "\uFEFF"; // Inyección de caracteres BOM para compatibilidad con acentos y caracteres especiales
+        contenidoCSV += "ID Empleado,Nombre Trabajador,Accion,Fecha,Hora\n";
+
+        registros.forEach(reg => {
+            resumenTexto += `${reg.nombre} | ${reg.tipo} | ${reg.fecha} | ${reg.hora}\n`;
+            contenidoCSV += `"${reg.idTrabajador}","${reg.nombre}","${reg.tipo}","${reg.fecha}","${reg.hora}"\n`;
+        });
+
+        // Forzar descarga del archivo CSV en el dispositivo de la empresa
+        let blob = new Blob([contenidoCSV], { type: 'text/csv;charset=utf-8;' });
+        let linkDescarga = document.createElement("a");
+        let urlBlob = URL.createObjectURL(blob);
+        let nombreArchivo = `asistencia_excel_${fechaHoy.replace(/\//g, '-')}.csv`;
+        
+        linkDescarga.setAttribute("href", urlBlob);
+        linkDescarga.setAttribute("download", nombreArchivo);
+        linkDescarga.style.visibility = 'hidden';
+        document.body.appendChild(linkDescarga);
+        linkDescarga.click();
+        document.body.removeChild(linkDescarga);
+
+        // Despachar llamada nativa al gestor de correo electrónico (Gmail/Outlook)
+        let asuntoAsignado = encodeURIComponent(`Cierre de Turno de Asistencia - ${fechaHoy}`);
+        let cuerpoMensaje = encodeURIComponent(resumenTexto);
+        
+        window.location.href = `mailto:${correoDestino}?subject=${asuntoAsignado}&body=${cuerpoMensaje}`;
+
+        // Alerta final de limpieza de turno operativo
+        setTimeout(() => {
+            if (confirm("El reporte en formato de Excel se ha descargado y el correo ha sido generado.\n\n¿Quieres BORRAR el historial de asistencia en pantalla para dejar el próximo turno libre? (Esto no borrará a tus trabajadores registrados).")) {
+                registros = [];
+                guardarDatos();
+                actualizarListaRegistros();
+            }
+        }, 1200);
+    }
+
+    // CONTROL DE DATOS Y RENDERIZADO DE INTERFAZ
+    function guardarDatos() {
+        localStorage.setItem('empleados_facial', JSON.stringify(empleados));
+        localStorage.setItem('registros_facial', JSON.stringify(registros));
+    }
+
+    function actualizarListaRegistros() {
+        let ul = document.getElementById('logList');
+        ul.innerHTML = "";
+        let ultimosDiez = registros.slice(0, 10);
+        ultimosDiez.forEach(reg => {
+            let li = document.createElement('li');
+            li.innerHTML = `<strong>${reg.nombre}</strong> - Presencia de ${reg.tipo} - Registrado a las ${reg.hora} (${reg.fecha})`;
+            ul.appendChild(li);
+        });
+    }
+
+    function limpiarRegistros() {
+        if(confirm("¿Estás seguro de restablecer por completo la lista actual de marcas?")){
+            registros = [];
+            guardarDatos();
+            actualizarListaRegistros();
+        }
+    }
+
+    function descargarJSON() {
+        if(registros.length === 0 && empleados.length === 0){
+            alert("No hay registros ni personal guardado para exportar.");
+            return;
+        }
+        let exportacionTotal = { personal: empleados, marcasAsistencia: registros };
+        let conversionStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportacionTotal, null, 4));
+        let nodoFicticio = document.createElement('a');
+        nodoFicticio.setAttribute("href", conversionStr);
+        nodoFicticio.setAttribute("download", "respaldo_sistema_facial.json");
+        document.body.appendChild(nodoFicticio);
+        nodoFicticio.click();
+        nodoFicticio.remove();
+    }
+</script>
+
+</body>
+</html>
