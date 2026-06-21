@@ -48,7 +48,7 @@
     </div>
 
     <div class="section">
-        <h3>1️⃣ Registro de Asistencia Automático (Ráfaga Veloz)</h3>
+        <h3>1️⃣ Registro de Asistencia Automático</h3>
         <button id="btnStartPunch" class="btn-green" onclick="iniciarEscaneoPonche()" disabled>📸 Escanear Mi Rostro</button>
     </div>
 
@@ -272,7 +272,6 @@
                 
                 if (capturaExitosa) {
                     descriptoresRecoleccion.push(capturaExitosa);
-                    // Avisamos visualmente que el ángulo fue capturado con éxito
                     document.getElementById('cameraSubText').innerText = "¡Ángulo capturado con éxito! Cambiando...";
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 } else {
@@ -293,7 +292,7 @@
                 descriptorPromediado[i] = sumaValores / 3;
             }
 
-            // --- ESCUDO ANTIDUPLICADOS CON EL PROMEDIO ---
+            // ESCUDO ANTIDUPLICADOS CON EL PROMEDIO
             let yaExistePersona = null;
             empleados.forEach(emp => {
                 const descGuardado = new Float32Array(emp.descriptor);
@@ -324,54 +323,47 @@
     }
 
     // =========================================================================
-    // PONCHE DIARIO: RÁFAGA ULTRA RÁPIDA DE FRENTE (MÁXIMA VELOCIDAD EN FILA)
+    // PONCHE DIARIO: VERIFICACIÓN ESTABLE CONTINUA (COMO ESTABA ANTES)
     // =========================================================================
     async function iniciarEscaneoPonche() {
         if (!modelosCargados) return;
+        if (empleados.length === 0) {
+            Swal.fire({ icon: 'info', title: 'Base de datos vacía', text: 'No hay trabajadores dados de alta.' });
+            return;
+        }
 
-        document.getElementById('cameraActionTitle').innerText = `Analizando Rostro...`;
-        document.getElementById('cameraSubText').innerText = "Ráfaga veloz de frente activa...";
+        document.getElementById('cameraActionTitle').innerText = `Escaneando Identidad...`;
+        document.getElementById('cameraSubText').innerText = "Buscando rostro de frente...";
         
         try {
             await encenderCamara();
             const video = document.getElementById('videoFeed');
-            
-            let ráfagaLecturas = [];
-            let intentosMaximos = 0;
-            
-            // Toma lecturas continuas lo más rápido posible (ráfaga instantánea)
-            while(rafagaLecturas.length < 3 && intentosMaximos < 25) {
-                let deteccion = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
-                if (deteccion) {
-                    rafagaLecturas.push(deteccion.descriptor);
-                }
-                intentosMaximos++;
-                await new Promise(resolve => setTimeout(resolve, 60)); // Intervalo de milisegundos imperceptible
+            let intentos = 0;
+            let rostroDetectado = null;
+
+            // Escaneo continuo estable hasta encontrar una cara firme
+            while (intentos < 40) {
+                rostroDetectado = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
+                if (rostroDetectado) break;
+                intentos++;
+                await new Promise(resolve => setTimeout(resolve, 200));
             }
 
             apagarCamara();
 
-            if (rafagaLecturas.length === 0) {
-                Swal.fire({ icon: 'warning', title: 'No se detectó rostro', text: 'Asegúrate de estar parado firmemente frente a la cámara.' });
+            if (!rostroDetectado) {
+                Swal.fire({ icon: 'warning', title: 'Tiempo Agotado', text: 'No se detectó ningún rostro estable frente a la cámara.' });
                 return;
             }
 
-            // Promediamos la ráfaga rápida de frente para anular variaciones de parpadeos o micro-sombras
-            let primerDesc = rafagaLecturas[0];
-            let descriptorPonche = new Float32Array(primerDesc.length);
-            for (let i = 0; i < primerDesc.length; i++) {
-                let suma = 0;
-                rafagaLecturas.forEach(d => { suma += d[i]; });
-                descriptorPonche[i] = suma / rafagaLecturas.length;
-            }
-
-            // Buscamos coincidencia contra el molde 3D guardado
+            const descriptorActual = rostroDetectado.descriptor;
             let trabajadorEncontrado = null;
             let diferenciaMinima = UMBRAL_TOLERANCIA;
 
+            // Comparar contra el molde de la base de datos
             empleados.forEach(emp => {
                 const descriptorGuardado = new Float32Array(emp.descriptor);
-                const diferencia = faceapi.euclideanDistance(descriptorPonche, descriptorGuardado);
+                const diferencia = faceapi.euclideanDistance(descriptorActual, descriptorGuardado);
                 if (diferencia < diferenciaMinima) {
                     diferenciaMinima = diferencia;
                     trabajadorEncontrado = emp;
@@ -379,6 +371,7 @@
             });
 
             if (trabajadorEncontrado) {
+                // Buscamos su última acción para automatizar si entra o sale
                 let historialPersona = registros
                     .filter(r => r.nombre === trabajadorEncontrado.nombre)
                     .sort((a, b) => a.timestamp - b.timestamp);
@@ -389,6 +382,7 @@
                     proximaAccionAuto = ultimaMarcaModo.tipo === "Entrada" ? "Salida" : "Entrada";
                 }
 
+                // Confirmación con SweetAlert
                 const confirmacion = await Swal.fire({
                     title: `¿Eres tú, ${trabajadorEncontrado.nombre}?`,
                     text: `El sistema detectó automáticamente tu: ${proximaAccionAuto}`,
@@ -407,7 +401,6 @@
                     if (proximaAccionAuto === "Salida" && historialPersona.length > 0) {
                         let ultimaEntradaCruce = historialPersona[historialPersona.length - 1];
                         if (ultimaEntradaCruce.tipo === "Entrada" && ultimaEntradaCruce.fecha !== fechaLimpia) {
-                            fechaLinter = ultimaEntradaCruce.fecha;
                             fechaLimpia = ultimaEntradaCruce.fecha;
                         }
                     }
@@ -430,7 +423,7 @@
         } catch (err) {
             console.error(err);
             apagarCamara();
-            Swal.fire({ icon: 'error', title: 'Error', text: 'Ocurrió un problema procesando el ponche ráfaga.' });
+            Swal.fire({ icon: 'error', title: 'Error', text: 'Ocurrió un error procesando el ponche.' });
         }
     }
 
