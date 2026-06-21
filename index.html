@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kiosco Facial Inteligente Pro</title>
+    <title>Kiosco Facial Automatizado Pro</title>
     <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
@@ -48,14 +48,14 @@
     </div>
 
     <div class="section">
-        <h3>1️⃣ Registro de Asistencia Automático (Multi-Ángulo)</h3>
+        <h3>1️⃣ Registro de Asistencia Automático (Ráfaga Veloz)</h3>
         <button id="btnStartPunch" class="btn-green" onclick="iniciarEscaneoPonche()" disabled>📸 Escanear Mi Rostro</button>
     </div>
 
     <div class="section">
-        <h3>2️⃣ Guardar Nuevo Trabajador (Solo Admin)</h3>
+        <h3>2️⃣ Guardar Nuevo Trabajador (Enrolamiento Completo)</h3>
         <input type="text" id="newEmpName" placeholder="Escribe el nombre del trabajador aquí...">
-        <button id="btnRegisterFace" onclick="verificarAdminParaRegistro()" disabled>👤 🔒 Validar Admin y Escanear</button>
+        <button id="btnRegisterFace" onclick="verificarAdminParaRegistro()" disabled>👤 🔒 Validar Admin e Iniciar Registro 3D</button>
     </div>
 
     <div class="section" style="background-color: #fff9f1; border-color: #f39c12;">
@@ -71,7 +71,7 @@
 
 <script>
     const CLAVE_ADMIN = "12345678";
-    const UMBRAL_TOLERANCIA = 0.55; // Menor número = más estricto. Evita falsos positivos.
+    const UMBRAL_TOLERANCIA = 0.55; 
 
     const firebaseConfig = {
       apiKey: "AIzaSyCrF72uUVwLQsjSm8Aoq87_8h8vv2InYuM",
@@ -233,167 +233,152 @@
             return;
         }
 
-        iniciarEscaneoRegistro(nombreInput);
+        iniciarEscaneoRegistroMultiAngulo(nombreInput);
     }
 
     // =========================================================================
-    // REGISTRO MEJORADO CON FILTRO ANTIDUPLICADOS
+    // REGISTRO DETALLADO: EXIGE 3 ÁNGULOS CON PAUSAS (ENTRENAMIENTO PERFECTO)
     // =========================================================================
-    async function iniciarEscaneoRegistro(nombreTrabajador) {
-        document.getElementById('cameraActionTitle').innerText = "Registrando Rostro...";
-        document.getElementById('cameraSubText').innerText = "Quédate quieto viendo al frente...";
-
-        try {
-            await encenderCamara();
-            const video = document.getElementById('videoFeed');
-            let intentos = 0;
-            let rostroCapturado = null;
-
-            while (intentos < 40) {
-                rostroCapturado = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
-                if (rostroCapturado) break;
-                intentos++;
-                await new Promise(resolve => setTimeout(resolve, 200));
-            }
-
-            apagarCamara();
-
-            if (!rostroCapturado) {
-                Swal.fire({ icon: 'error', title: 'Fallo de Captura', text: 'No se detectó un rostro claro.' });
-                return;
-            }
-
-            // --- ESCUDO ANTIDUPLICADOS ---
-            const descriptorNuevo = rostroCapturado.descriptor;
-            let yaExistePersona = null;
-
-            empleados.forEach(emp => {
-                const descGuardado = new Float32Array(emp.descriptor);
-                const distancia = faceapi.euclideanDistance(descriptorNuevo, descGuardado);
-                if (distancia < UMBRAL_TOLERANCIA) {
-                    yaExistePersona = emp;
-                }
-            });
-
-            if (yaExistePersona) {
-                Swal.fire({
-                    icon: 'error',
-                    title: '¡Rostro Duplicado!',
-                    text: `Este rostro ya está registrado en el sistema bajo el nombre de: ${yaExistePersona.nombre}.`
-                });
-                return;
-            }
-            // -----------------------------
-
-            let descriptorPlano = Array.from(descriptorNuevo);
-            let nuevoEmpleado = { nombre: nombreTrabajador, descriptor: descriptorPlano };
-
-            await db.collection("empleados").add(nuevoEmpleado);
-            document.getElementById('newEmpName').value = "";
-            
-            Swal.fire({ icon: 'success', title: '¡Registro Exitoso!', text: `${nombreTrabajador} guardado en la nube.` });
-
-        } catch (err) {
-            console.error(err);
-            apagarCamara();
-            Swal.fire({ icon: 'error', title: 'Error', text: 'No se pudo acceder a la cámara.' });
-        }
-    }
-
-    // =========================================================================
-    // VERIFICACIÓN INTEGRAL PAUSADA (PASO A PASO POR ÁNGULOS)
-    // =========================================================================
-    async function iniciarEscaneoPonche() {
-        if (!modelosCargados) return;
-
-        document.getElementById('cameraActionTitle').innerText = `Iniciando Verificación...`;
+    async function iniciarEscaneoRegistroMultiAngulo(nombreTrabajador) {
+        document.getElementById('cameraArea').style.display = 'block';
+        document.getElementById('cameraActionTitle').innerText = "Enrolamiento Biométrico 3D";
         
         try {
             await encenderCamara();
             const video = document.getElementById('videoFeed');
             
-            // Declaramos las instrucciones de los ángulos para guiar al trabajador paso a paso
             let pasosGiro = [
-                "Paso 1/3: Mira FIJO de frente...",
-                "Paso 2/3: Gira LEVEMENTE a la derecha...",
-                "Paso 3/3: Gira LEVEMENTE a la izquierda..."
+                "Paso 1 de 3: Quédate quieto mirando DE FRENTE...",
+                "Paso 2 de 3: Gira LEVEMENTE el rostro a la DERECHA...",
+                "Paso 3 de 3: Gira LEVEMENTE el rostro a la IZQUIERDA..."
             ];
             
-            let descriptoresCapturados = [];
+            let descriptoresRecoleccion = [];
             
-            // Bucle exhaustivo: Obligamos al sistema a tomar 3 muestras en diferentes estados
             for(let paso = 0; paso < pasosGiro.length; paso++) {
                 document.getElementById('cameraSubText').innerText = pasosGiro[paso];
-                
-                let lecturaExitosa = null;
+                let capturaExitosa = null;
                 let intentosPaso = 0;
                 
-                // Damos hasta 30 intentos (6 segundos) por cada ángulo para que la persona se mueva
-                while(intentosPaso < 30) {
+                while(intentosPaso < 40) {
                     let deteccion = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
                     if (deteccion) {
-                        lecturaExitosa = deteccion.descriptor;
+                        capturaExitosa = deteccion.descriptor;
                         break;
                     }
                     intentosPaso++;
                     await new Promise(resolve => setTimeout(resolve, 200));
                 }
                 
-                if (lecturaExitosa) {
-                    descriptoresCapturados.push(lecturaExitosa);
-                    // Pequeña pausa visual para que el trabajador note que se aceptó el paso
-                    await new Promise(resolve => setTimeout(resolve, 400));
+                if (capturaExitosa) {
+                    descriptoresRecoleccion.push(capturaExitosa);
+                    // Avisamos visualmente que el ángulo fue capturado con éxito
+                    document.getElementById('cameraSubText').innerText = "¡Ángulo capturado con éxito! Cambiando...";
+                    await new Promise(resolve => setTimeout(resolve, 1000));
                 } else {
-                    // Si se mueve muy rápido o no lee, rompemos el bucle
-                    break;
+                    apagarCamara();
+                    Swal.fire({ icon: 'error', title: 'Registro Cancelado', text: `No se pudo obtener una lectura clara en el paso: ${paso + 1}. Asegúrate de tener buena iluminación.` });
+                    return;
                 }
             }
 
             apagarCamara();
 
-            // Si no recolectó las 3 muestras completas, significa que falló el proceso pausado
-            if (descriptoresCapturados.length < 3) {
-                Swal.fire({ icon: 'warning', title: 'Escaneo Incompleto', text: 'No se pudieron validar los tres ángulos requeridos. Por favor, mantén una postura firme y pausada.' });
-                return;
+            // Promediamos matemáticamente las 3 capturas para crear un modelo sólido de la cara
+            let primerDescriptor = descriptoresRecoleccion[0];
+            let descriptorPromediado = new Float32Array(primerDescriptor.length);
+            
+            for (let i = 0; i < primerDescriptor.length; i++) {
+                let sumaValores = descriptoresRecoleccion[0][i] + descriptoresRecoleccion[1][i] + descriptoresRecoleccion[2][i];
+                descriptorPromediado[i] = sumaValores / 3;
             }
 
-            // Evaluamos las 3 muestras contra la base de datos para buscar votación mayoritaria o consistencia
-            let votosTrabajadores = {};
-            
-            // Analizamos cada una de las 3 muestras tomadas
-            descriptoresCapturados.forEach(descriptorActual => {
-                let mejorMatchPaso = null;
-                let distMinima = UMBRAL_TOLERANCIA;
-
-                empleados.forEach(emp => {
-                    const descGuardado = new Float32Array(emp.descriptor);
-                    const distancia = faceapi.euclideanDistance(descriptorActual, descGuardado);
-                    if (distancia < distMinima) {
-                        distMinima = distancia;
-                        mejorMatchPaso = emp;
-                    }
-                });
-
-                if (mejorMatchPaso) {
-                    votosTrabajadores[mejorMatchPaso.nombre] = (votosTrabajadores[mejorMatchPaso.nombre] || 0) + 1;
+            // --- ESCUDO ANTIDUPLICADOS CON EL PROMEDIO ---
+            let yaExistePersona = null;
+            empleados.forEach(emp => {
+                const descGuardado = new Float32Array(emp.descriptor);
+                const distancia = faceapi.euclideanDistance(descriptorPromediado, descGuardado);
+                if (distancia < UMBRAL_TOLERANCIA) {
+                    yaExistePersona = emp;
                 }
             });
 
-            // Buscamos cuál trabajador obtuvo la mayor cantidad de coincidencias estables en los ángulos
-            let nombreGanador = null;
-            let maxVotos = 0;
-            
-            for (let nombre in votosTrabajadores) {
-                if (votosTrabajadores[nombre] > maxVotos) {
-                    maxVotos = votosTrabajadores[nombre];
-                    nombreGanador = nombre;
-                }
+            if (yaExistePersona) {
+                Swal.fire({ icon: 'error', title: '¡Rostro Ya Existente!', text: `Esta identidad ya está dada de alta bajo el nombre de: ${yaExistePersona.nombre}.` });
+                return;
             }
 
-            // Exigimos que al menos 2 de los 3 ángulos hayan verificado exitosamente a la misma persona
-            if (nombreGanador && maxVotos >= 2) {
-                let trabajadorEncontrado = empleados.find(e => e.nombre === nombreGanador);
-                
+            let descriptorPlano = Array.from(descriptorPromediado);
+            let nuevoEmpleado = { nombre: nombreTrabajador, descriptor: descriptorPlano };
+
+            await db.collection("empleados").add(nuevoEmpleado);
+            document.getElementById('newEmpName').value = "";
+            
+            Swal.fire({ icon: 'success', title: '¡Alta Biométrica Exitosa!', text: `${nombreTrabajador} ha sido guardado con un molde facial de tres ángulos.` });
+
+        } catch (err) {
+            console.error(err);
+            apagarCamara();
+            Swal.fire({ icon: 'error', title: 'Error', text: 'Ocurrió un fallo accediendo a la cámara corporativa.' });
+        }
+    }
+
+    // =========================================================================
+    // PONCHE DIARIO: RÁFAGA ULTRA RÁPIDA DE FRENTE (MÁXIMA VELOCIDAD EN FILA)
+    // =========================================================================
+    async function iniciarEscaneoPonche() {
+        if (!modelosCargados) return;
+
+        document.getElementById('cameraActionTitle').innerText = `Analizando Rostro...`;
+        document.getElementById('cameraSubText').innerText = "Ráfaga veloz de frente activa...";
+        
+        try {
+            await encenderCamara();
+            const video = document.getElementById('videoFeed');
+            
+            let ráfagaLecturas = [];
+            let intentosMaximos = 0;
+            
+            // Toma lecturas continuas lo más rápido posible (ráfaga instantánea)
+            while(rafagaLecturas.length < 3 && intentosMaximos < 25) {
+                let deteccion = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
+                if (deteccion) {
+                    rafagaLecturas.push(deteccion.descriptor);
+                }
+                intentosMaximos++;
+                await new Promise(resolve => setTimeout(resolve, 60)); // Intervalo de milisegundos imperceptible
+            }
+
+            apagarCamara();
+
+            if (rafagaLecturas.length === 0) {
+                Swal.fire({ icon: 'warning', title: 'No se detectó rostro', text: 'Asegúrate de estar parado firmemente frente a la cámara.' });
+                return;
+            }
+
+            // Promediamos la ráfaga rápida de frente para anular variaciones de parpadeos o micro-sombras
+            let primerDesc = rafagaLecturas[0];
+            let descriptorPonche = new Float32Array(primerDesc.length);
+            for (let i = 0; i < primerDesc.length; i++) {
+                let suma = 0;
+                rafagaLecturas.forEach(d => { suma += d[i]; });
+                descriptorPonche[i] = suma / rafagaLecturas.length;
+            }
+
+            // Buscamos coincidencia contra el molde 3D guardado
+            let trabajadorEncontrado = null;
+            let diferenciaMinima = UMBRAL_TOLERANCIA;
+
+            empleados.forEach(emp => {
+                const descriptorGuardado = new Float32Array(emp.descriptor);
+                const diferencia = faceapi.euclideanDistance(descriptorPonche, descriptorGuardado);
+                if (diferencia < diferenciaMinima) {
+                    diferenciaMinima = diferencia;
+                    trabajadorEncontrado = emp;
+                }
+            });
+
+            if (trabajadorEncontrado) {
                 let historialPersona = registros
                     .filter(r => r.nombre === trabajadorEncontrado.nombre)
                     .sort((a, b) => a.timestamp - b.timestamp);
@@ -406,7 +391,7 @@
 
                 const confirmacion = await Swal.fire({
                     title: `¿Eres tú, ${trabajadorEncontrado.nombre}?`,
-                    text: `Validación por ángulos exitosa. Acción: ${proximaAccionAuto}`,
+                    text: `El sistema detectó automáticamente tu: ${proximaAccionAuto}`,
                     icon: 'question',
                     showCancelButton: true,
                     confirmButtonText: `Sí, marcar ${proximaAccionAuto}`,
@@ -422,6 +407,7 @@
                     if (proximaAccionAuto === "Salida" && historialPersona.length > 0) {
                         let ultimaEntradaCruce = historialPersona[historialPersona.length - 1];
                         if (ultimaEntradaCruce.tipo === "Entrada" && ultimaEntradaCruce.fecha !== fechaLimpia) {
+                            fechaLinter = ultimaEntradaCruce.fecha;
                             fechaLimpia = ultimaEntradaCruce.fecha;
                         }
                     }
@@ -435,16 +421,16 @@
                     };
 
                     await db.collection("registros").add(nuevoRegistro);
-                    Swal.fire({ icon: 'success', title: '¡Registrado!', text: `Se registró tu ${proximaAccionAuto} con éxito.`, timer: 2000, showConfirmButton: false });
+                    Swal.fire({ icon: 'success', title: '¡Registrado!', text: `Tu ${proximaAccionAuto} se guardó con éxito.`, timer: 2000, showConfirmButton: false });
                 }
             } else {
-                Swal.fire({ icon: 'error', title: 'No Reconocido', text: 'La verificación por ángulos falló. El rostro no coincide de forma consistente con ningún trabajador registrado.' });
+                Swal.fire({ icon: 'error', title: 'No Reconocido', text: 'El rostro no coincide con ningún miembro registrado.' });
             }
 
         } catch (err) {
             console.error(err);
             apagarCamara();
-            Swal.fire({ icon: 'error', title: 'Error', text: 'Ocurrió un error operativo en el hardware.' });
+            Swal.fire({ icon: 'error', title: 'Error', text: 'Ocurrió un problema procesando el ponche ráfaga.' });
         }
     }
 
